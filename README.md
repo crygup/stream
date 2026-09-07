@@ -3,14 +3,13 @@
 Loop local videos on Twitch. When none are enabled, a burger bounces around a
 black screen. Requires Linux, Python 3.10+, and FFmpeg/FFprobe with libx264 and librsvg.
 
+Only your stream key is required to play videos. Videos play in filename order. 
+
 ## Start
 
 1. Copy `examples/config.json` to `config.json` and enter your Twitch `stream_key`.
 2. Put videos in `videos/`.
 3. Run `python3 stream.py`. Stop with Ctrl+C.
-
-Only the stream key is required. Videos play in filename order. Preparation takes
-time and disk space; temporary copies are cleaned up automatically.
 
 ## Choose videos
 
@@ -33,14 +32,6 @@ To enable automatic updates:
 
 Tokens renew automatically. Authorization problems won't stop video playback.
 Use `python3 stream.py --update-info` to apply title/category changes immediately.
-
-## Checks
-
-- Local preview: `python3 stream.py --preview` (writes an ignored 10-second video).
-- Offline tests: `python3 test/run.py`.
-
-Local configs, credentials, videos, previews, and temporary files are ignored by
-Git. Only blank/example configs belong in `examples/`.
 
 Burger artwork: [Twemoji](https://github.com/twitter/twemoji),
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See `assets/CREDITS.md`.
