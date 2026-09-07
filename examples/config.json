@@ -1,0 +1,13 @@
+{
+  "stream_key": "",
+  "ingest_url": "rtmp://live.twitch.tv/app",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "video_bitrate_kbps": 4500,
+  "manage_broadcast": false,
+  "client_id": "",
+  "client_secret": "",
+  "access_token": "",
+  "refresh_token": ""
+}

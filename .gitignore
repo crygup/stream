@@ -1,0 +1,35 @@
+# Local configuration and credentials; templates live in examples/.
+/config*.json
+/broadcast*.json
+/playlist*.json
+.env*
+*credentials*
+*cookies*
+*tokens*
+*.pem
+*.key
+.auth.lock
+.auth-*
+
+# Local media and generated files.
+/videos/*
+!/videos/.gitkeep
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.m4v
+*.ts
+*.flv
+preview*
+.prepared-*
+*.log
+
+# Development files.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.DS_Store
