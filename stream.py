@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
-import random
+import threading
 import signal
 import fcntl
 import shutil
@@ -84,7 +84,7 @@ def optional_broadcast(config):
             )
 
 
-def run(args, pass_fds=()):
+def run(args, pass_fds=(), input_frames=None):
     private_values = []
     for argument in args:
         if isinstance(argument, str) and argument.startswith(("rtmp://", "rtmps://")):
@@ -92,17 +92,47 @@ def run(args, pass_fds=()):
     with subprocess.Popen(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *args],
         pass_fds=pass_fds,
+        stdin=subprocess.PIPE if input_frames is not None else None,
         stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
     ) as process:
-        for line in process.stderr:
-            for value in private_values:
-                if value:
-                    line = line.replace(value, "[redacted]")
-            print(line, end="", flush=True)
-        if process.wait():
-            raise subprocess.CalledProcessError(process.returncode, ["ffmpeg"])
+        stderr = process.stderr
+        assert stderr is not None
+
+        def report_errors():
+            for line in stderr:
+                line = line.decode(errors="replace")
+                for value in private_values:
+                    if value:
+                        line = line.replace(value, "[redacted]")
+                print(line, end="", flush=True)
+
+        reporter = threading.Thread(target=report_errors, daemon=True)
+        reporter.start()
+        try:
+            if input_frames is not None:
+                stdin = process.stdin
+                assert stdin is not None
+                try:
+                    for frame in input_frames:
+                        stdin.write(frame)
+                except BrokenPipeError:
+                    pass
+                finally:
+                    try:
+                        stdin.close()
+                    except BrokenPipeError:
+                        pass
+            if process.wait():
+                raise subprocess.CalledProcessError(process.returncode, ["ffmpeg"])
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            reporter.join(timeout=2)
 
 
 def cleanup_prepared():
@@ -152,23 +182,18 @@ def selected_videos():
 
 
 def idle_screen(config, preview=False):
-    width, height, fps, bitrate = (
-        config[k] for k in ("width", "height", "fps", "video_bitrate_kbps")
+    from screensaver import prepare, frames
+
+    fps, bounce, sprites = prepare(config, ROOT)
+    width, height, bitrate = (
+        config[k] for k in ("width", "height", "video_bitrate_kbps")
     )
-    size = max(2, min(width, height) // 7 // 2 * 2)
-
-    # A triangle wave reflects velocity at each edge; random phases and speeds
-    # give every run a different DVD-style path without rendering frames in Python.
-    def bounce(span, speed):
-        span = max(1, span)
-        phase = random.uniform(0, span * 2)
-        return f"abs(mod({phase}+t*{speed},{2 * span})-{span})"
-
-    x = bounce(width - size, width * random.uniform(0.12, 0.20))
-    y = bounce(height - size, height * random.uniform(0.13, 0.23))
     if not preview:
         optional_broadcast(config)
-    print("No enabled videos: bouncing burger idle screen.", flush=True)
+    print(
+        f"No enabled videos: screensaver with {len(sprites)} images at {fps} FPS.",
+        flush=True,
+    )
     output = (
         ["-t", "10", "-y", str(ROOT / "preview.flv")]
         if preview
@@ -176,27 +201,25 @@ def idle_screen(config, preview=False):
     )
     run(
         [
-            "-re",
             "-f",
-            "lavfi",
+            "rawvideo",
+            "-pixel_format",
+            "rgb24",
+            "-video_size",
+            f"{width}x{height}",
+            "-framerate",
+            str(fps),
             "-i",
-            f"color=c=black:s={width}x{height}:r={fps}",
-            "-width",
-            str(size),
-            "-height",
-            str(size),
-            "-i",
-            str(ROOT / "assets" / "burger.svg"),
+            "pipe:0",
             "-f",
             "lavfi",
             "-i",
             "anullsrc=r=48000:cl=stereo",
-            "-filter_complex",
-            f"[0:v][1:v]overlay=x='{x}':y='{y}'[v]",
             "-map",
-            "[v]",
+            "0:v:0",
             "-map",
-            "2:a:0",
+            "1:a:0",
+            "-shortest",
             "-c:v",
             "libx264",
             "-preset",
@@ -230,7 +253,10 @@ def idle_screen(config, preview=False):
             "-f",
             "flv",
             *output,
-        ]
+        ],
+        input_frames=frames(
+            sprites, width, height, fps, bounce, seconds=10 if preview else None
+        ),
     )
 
 

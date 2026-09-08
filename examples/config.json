@@ -1,4 +1,9 @@
 {
+  "screensaver": {
+    "fps": 60,
+    "bounce": true,
+    "images": {"burger.svg": true}
+  },
   "stream_key": "",
   "ingest_url": "rtmp://live.twitch.tv/app",
   "width": 1920,

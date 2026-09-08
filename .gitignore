@@ -12,6 +12,7 @@
 .auth-*
 
 # Local media and generated files.
+/assets/drpepper*
 /videos/*
 !/videos/.gitkeep
 *.mp4
@@ -27,6 +28,10 @@ preview*
 *.log
 
 # Development files.
+/test/
+/tests/
+test_*.py
+*_test.py
 .venv/
 __pycache__/
 *.py[cod]

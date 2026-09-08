@@ -1,37 +1,35 @@
 # Twitch video loop
 
-Loop local videos on Twitch. When none are enabled, a burger bounces around a
-black screen. Requires Linux, Python 3.10+, and FFmpeg/FFprobe with libx264 and librsvg.
-
-Only your stream key is required to play videos. Videos play in filename order. 
+Loop videos on Twitch, or show a screensaver when no videos are enabled.
+Requires Linux, Python 3.10+, and FFmpeg/FFprobe with libx264 and librsvg.
 
 ## Start
 
 1. Copy `examples/config.json` to `config.json` and enter your Twitch `stream_key`.
-2. Put videos in `videos/`.
-3. Run `python3 stream.py`. Stop with Ctrl+C.
+2. Put videos in `videos/`; they play in filename order.
+3. Install and run:
 
-## Choose videos
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python stream.py
+```
 
-Copy `examples/playlist.json` to `playlist.json`. Use exact filenames:
-`true` plays, `false` skips. Unlisted videos play by default.
-Restart after changes. All disabled means the burger screen.
+Stop with Ctrl+C. Use `--preview` for a local 10-second preview.
 
-## Optional title and category
+## Configuration
 
-Set these in a copy of `examples/broadcast.json` named `broadcast.json`.
-`None` clears the category; otherwise use its exact Twitch name.
+- Set resolution, FPS, and bitrate in `config.json`.
+- Copy `examples/playlist.json` to `playlist.json` to enable/disable videos by filename. Unlisted videos are enabled.
+- Add multiple GIF, WebP, PNG, or SVG images to `assets/` and list them in `screensaver.images` section in the config file with `true`/`false` toggles.
+- `screensaver.bounce` controls collisions (default `true`); `screensaver.fps` controls movement smoothness (1–120, default 60).
+- Restart after configuration changes.
 
-To enable automatic updates:
+## Optional Twitch title and category
 
-1. Add your Twitch app's `client_id` and `client_secret` to `config.json`.
-2. Register `http://localhost:3000` as the app's OAuth redirect URL.
-3. Run `python3 twitch_auth.py`, open its link, and authorize your channel.
-4. Paste the redirected address into the terminal, even if localhost fails to load.
-5. Set `manage_broadcast` to `true` in `config.json`.
+1. Copy `examples/broadcast.json` to `broadcast.json` and edit the title/category. Use `null` to clear the category.
+2. Add your Twitch application's `client_id` and `client_secret` to `config.json`, with `http://localhost:3000` registered as its OAuth redirect URL.
+3. Run `.venv/bin/python twitch_auth.py`, authorize your channel, and paste the redirected URL into the terminal.
+4. Set `manage_broadcast` to `true`, or run `.venv/bin/python stream.py --update-info` to update immediately.
 
-Tokens renew automatically. Authorization problems won't stop video playback.
-Use `python3 stream.py --update-info` to apply title/category changes immediately.
-
-Burger artwork: [Twemoji](https://github.com/twitter/twemoji),
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See `assets/CREDITS.md`.
+Burger artwork: [Twemoji](https://github.com/twitter/twemoji/blob/v14.0.2/assets/svg/1f354.svg), © Twitter and contributors, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); resized and animated.
