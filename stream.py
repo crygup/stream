@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Prepare a folder of videos, then broadcast the playlist forever."""
+
 import argparse
 import json
 from pathlib import Path
@@ -26,12 +27,16 @@ def update_broadcast(config):
     ensure_token(config)
 
     def api(path, body=None, retry=True):
-        request = Request("https://api.twitch.tv/helix/" + path,
-                          data=json.dumps(body).encode() if body is not None else None,
-                          method="PATCH" if body is not None else "GET",
-                          headers={"Client-Id": config["client_id"],
-                                   "Authorization": "Bearer " + config["access_token"],
-                                   "Content-Type": "application/json"})
+        request = Request(
+            "https://api.twitch.tv/helix/" + path,
+            data=json.dumps(body).encode() if body is not None else None,
+            method="PATCH" if body is not None else "GET",
+            headers={
+                "Client-Id": config["client_id"],
+                "Authorization": "Bearer " + config["access_token"],
+                "Content-Type": "application/json",
+            },
+        )
         try:
             with urlopen(request, timeout=20) as response:
                 data = response.read()
@@ -49,14 +54,23 @@ def update_broadcast(config):
         if not games:
             raise ValueError(f"Twitch category not found: {category}")
         game_id = games[0]["id"]
-    api("channels?" + urlencode({"broadcaster_id": user["id"]}),
-        {"title": title, "game_id": game_id})
+    api(
+        "channels?" + urlencode({"broadcaster_id": user["id"]}),
+        {"title": title, "game_id": game_id},
+    )
     print("Twitch title and category updated.", flush=True)
+
 
 ROOT = Path(__file__).resolve().parent
 EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v", ".ts"}
-DEFAULTS = dict(ingest_url="rtmp://live.twitch.tv/app", width=1920, height=1080,
-                fps=30, video_bitrate_kbps=4500, manage_broadcast=False)
+DEFAULTS = dict(
+    ingest_url="rtmp://live.twitch.tv/app",
+    width=1920,
+    height=1080,
+    fps=30,
+    video_bitrate_kbps=4500,
+    manage_broadcast=False,
+)
 
 
 def optional_broadcast(config):
@@ -64,11 +78,31 @@ def optional_broadcast(config):
         try:
             update_broadcast(config)
         except (ValueError, OSError, KeyError):
-            print("Title/category update unavailable; continuing video playback. Run --update-info for details.", flush=True)
+            print(
+                "Title/category update unavailable; continuing video playback. Run --update-info for details.",
+                flush=True,
+            )
 
 
 def run(args, pass_fds=()):
-    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *args], check=True, pass_fds=pass_fds)
+    private_values = []
+    for argument in args:
+        if isinstance(argument, str) and argument.startswith(("rtmp://", "rtmps://")):
+            private_values.extend((argument, argument.rsplit("/", 1)[-1]))
+    with subprocess.Popen(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", *args],
+        pass_fds=pass_fds,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+    ) as process:
+        for line in process.stderr:
+            for value in private_values:
+                if value:
+                    line = line.replace(value, "[redacted]")
+            print(line, end="", flush=True)
+        if process.wait():
+            raise subprocess.CalledProcessError(process.returncode, ["ffmpeg"])
 
 
 def cleanup_prepared():
@@ -100,47 +134,118 @@ def prepared_directory():
 def selected_videos():
     path = ROOT / "playlist.json"
     toggles = json.loads(path.read_text()) if path.exists() else {}
-    if not isinstance(toggles, dict) or any(type(value) is not bool for value in toggles.values()):
+    if not isinstance(toggles, dict) or any(
+        type(value) is not bool for value in toggles.values()
+    ):
         raise ValueError("playlist.json must map video filenames to true or false.")
-    videos = sorted((p for p in (ROOT / "videos").iterdir()
-                     if p.is_file() and p.suffix.lower() in EXTENSIONS
-                     and toggles.get(p.name, True)), key=lambda p: p.name)
+    videos = sorted(
+        (
+            p
+            for p in (ROOT / "videos").iterdir()
+            if p.is_file()
+            and p.suffix.lower() in EXTENSIONS
+            and toggles.get(p.name, True)
+        ),
+        key=lambda p: p.name,
+    )
     return videos
 
 
 def idle_screen(config, preview=False):
-    width, height, fps, bitrate = (config[k] for k in
-                                 ("width", "height", "fps", "video_bitrate_kbps"))
+    width, height, fps, bitrate = (
+        config[k] for k in ("width", "height", "fps", "video_bitrate_kbps")
+    )
     size = max(2, min(width, height) // 7 // 2 * 2)
+
     # A triangle wave reflects velocity at each edge; random phases and speeds
     # give every run a different DVD-style path without rendering frames in Python.
     def bounce(span, speed):
         span = max(1, span)
         phase = random.uniform(0, span * 2)
         return f"abs(mod({phase}+t*{speed},{2 * span})-{span})"
+
     x = bounce(width - size, width * random.uniform(0.12, 0.20))
     y = bounce(height - size, height * random.uniform(0.13, 0.23))
     if not preview:
         optional_broadcast(config)
     print("No enabled videos: bouncing burger idle screen.", flush=True)
-    output = (["-t", "10", "-y", str(ROOT / "preview.flv")] if preview else
-              [config["ingest_url"].rstrip("/") + "/" + config["stream_key"].strip()])
-    run(["-re", "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r={fps}",
-         "-width", str(size), "-height", str(size), "-i", str(ROOT / "assets" / "burger.svg"),
-         "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
-         "-filter_complex", f"[0:v][1:v]overlay=x='{x}':y='{y}'[v]",
-         "-map", "[v]", "-map", "2:a:0", "-c:v", "libx264", "-preset", "veryfast",
-         "-pix_fmt", "yuv420p", "-b:v", f"{bitrate}k", "-minrate", f"{bitrate}k",
-         "-maxrate", f"{bitrate}k", "-bufsize", f"{bitrate * 2}k",
-         "-g", str(fps * 2), "-keyint_min", str(fps * 2), "-sc_threshold", "0",
-         "-x264-params", "nal-hrd=cbr", "-c:a", "aac", "-b:a", "160k",
-         "-ar", "48000", "-ac", "2", "-f", "flv", *output])
+    output = (
+        ["-t", "10", "-y", str(ROOT / "preview.flv")]
+        if preview
+        else [config["ingest_url"].rstrip("/") + "/" + config["stream_key"].strip()]
+    )
+    run(
+        [
+            "-re",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=black:s={width}x{height}:r={fps}",
+            "-width",
+            str(size),
+            "-height",
+            str(size),
+            "-i",
+            str(ROOT / "assets" / "burger.svg"),
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=48000:cl=stereo",
+            "-filter_complex",
+            f"[0:v][1:v]overlay=x='{x}':y='{y}'[v]",
+            "-map",
+            "[v]",
+            "-map",
+            "2:a:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-pix_fmt",
+            "yuv420p",
+            "-b:v",
+            f"{bitrate}k",
+            "-minrate",
+            f"{bitrate}k",
+            "-maxrate",
+            f"{bitrate}k",
+            "-bufsize",
+            f"{bitrate * 2}k",
+            "-g",
+            str(fps * 2),
+            "-keyint_min",
+            str(fps * 2),
+            "-sc_threshold",
+            "0",
+            "-x264-params",
+            "nal-hrd=cbr",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "160k",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-f",
+            "flv",
+            *output,
+        ]
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preview", action="store_true", help="Save 10 seconds locally instead of broadcasting")
-    parser.add_argument("--update-info", action="store_true", help="Apply broadcast.json without starting a stream")
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Save 10 seconds locally instead of broadcasting",
+    )
+    parser.add_argument(
+        "--update-info",
+        action="store_true",
+        help="Apply broadcast.json without starting a stream",
+    )
     args = parser.parse_args()
     if args.preview and args.update_info:
         parser.error("Choose --preview or --update-info, not both.")
@@ -152,10 +257,17 @@ def main():
     videos = selected_videos()
     if not args.preview and not config.get("stream_key", "").strip():
         raise ValueError("Set stream_key in config.json first, or use --preview.")
-    width, height, fps, bitrate = (config[k] for k in
-                                 ("width", "height", "fps", "video_bitrate_kbps"))
-    if any(type(n) is not int or n <= 0 for n in (width, height, fps, bitrate)) or width % 2 or height % 2:
-        raise ValueError("Video settings must be positive integers; width and height must be even.")
+    width, height, fps, bitrate = (
+        config[k] for k in ("width", "height", "fps", "video_bitrate_kbps")
+    )
+    if (
+        any(type(n) is not int or n <= 0 for n in (width, height, fps, bitrate))
+        or width % 2
+        or height % 2
+    ):
+        raise ValueError(
+            "Video settings must be positive integers; width and height must be even."
+        )
     if not videos:
         idle_screen(config, preview=args.preview)
         return
@@ -163,32 +275,111 @@ def main():
     with prepared_directory() as (prepared, lock_fd):
         for index, video in enumerate(videos):
             print(f"Preparing {index + 1}/{len(videos)}: {video.name}", flush=True)
-            probe = subprocess.check_output([
-                "ffprobe", "-v", "error", "-select_streams", "a:0",
-                "-show_entries", "stream=index", "-of", "csv=p=0", str(video)], text=True, pass_fds=(lock_fd,))
+            probe = subprocess.check_output(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=index",
+                    "-of",
+                    "csv=p=0",
+                    str(video),
+                ],
+                text=True,
+                pass_fds=(lock_fd,),
+            )
             inputs = ["-i", str(video)]
             if not probe.strip():
                 inputs += ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
-            run([*inputs, "-map", "0:v:0", "-map", "0:a:0" if probe.strip() else "1:a:0",
-                 "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}",
-                 "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-                 "-b:v", f"{bitrate}k", "-minrate", f"{bitrate}k", "-maxrate", f"{bitrate}k",
-                 "-bufsize", f"{bitrate * 2}k", "-g", str(fps * 2), "-keyint_min", str(fps * 2),
-                 "-sc_threshold", "0", "-x264-params", "nal-hrd=cbr",
-                 "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
-                 "-af", "apad", "-shortest", str(prepared / f"{index}.mp4")], pass_fds=(lock_fd,))
+            run(
+                [
+                    *inputs,
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "0:a:0" if probe.strip() else "1:a:0",
+                    "-vf",
+                    f"scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-b:v",
+                    f"{bitrate}k",
+                    "-minrate",
+                    f"{bitrate}k",
+                    "-maxrate",
+                    f"{bitrate}k",
+                    "-bufsize",
+                    f"{bitrate * 2}k",
+                    "-g",
+                    str(fps * 2),
+                    "-keyint_min",
+                    str(fps * 2),
+                    "-sc_threshold",
+                    "0",
+                    "-x264-params",
+                    "nal-hrd=cbr",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "160k",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                    "-af",
+                    "apad",
+                    "-shortest",
+                    str(prepared / f"{index}.mp4"),
+                ],
+                pass_fds=(lock_fd,),
+            )
         playlist = prepared / "playlist.txt"
         playlist.write_text("".join(f"file '{i}.mp4'\n" for i in range(len(videos))))
-        output = (["-t", "10", "-y", str(ROOT / "preview.flv")] if args.preview else
-                  [config["ingest_url"].rstrip("/") + "/" + config["stream_key"].strip()])
+        output = (
+            ["-t", "10", "-y", str(ROOT / "preview.flv")]
+            if args.preview
+            else [config["ingest_url"].rstrip("/") + "/" + config["stream_key"].strip()]
+        )
         if not args.preview:
             optional_broadcast(config)
-        print("Saving preview.flv" if args.preview else "Streaming playlist on loop. Press Ctrl+C to stop.", flush=True)
-        run(["-re", "-stream_loop", "-1", "-f", "concat", "-safe", "1", "-i", str(playlist),
-             "-c", "copy", "-f", "flv", *output], pass_fds=(lock_fd,))
+        print(
+            (
+                "Saving preview.flv"
+                if args.preview
+                else "Streaming playlist on loop. Press Ctrl+C to stop."
+            ),
+            flush=True,
+        )
+        run(
+            [
+                "-re",
+                "-stream_loop",
+                "-1",
+                "-f",
+                "concat",
+                "-safe",
+                "1",
+                "-i",
+                str(playlist),
+                "-c",
+                "copy",
+                "-f",
+                "flv",
+                *output,
+            ],
+            pass_fds=(lock_fd,),
+        )
 
 
 if __name__ == "__main__":
+
     def stop(signum, frame):
         raise KeyboardInterrupt
 
@@ -199,5 +390,7 @@ if __name__ == "__main__":
         pass
     except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
         # Avoid printing command arguments, which include the private stream key.
-        print(f"Stopped: {error if not isinstance(error, subprocess.CalledProcessError) else 'FFmpeg/FFprobe failed; see output above.'}")
+        print(
+            f"Stopped: {error if not isinstance(error, subprocess.CalledProcessError) else 'FFmpeg/FFprobe failed; see output above.'}"
+        )
         raise SystemExit(1)
